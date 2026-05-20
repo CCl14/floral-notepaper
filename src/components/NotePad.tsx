@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import {
   createNote,
@@ -123,14 +123,19 @@ export function NotePad({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [noteSurfaceAutoSave, setNoteSurfaceAutoSave] =
     useState(initialAutoSave);
-  const [tileColorRaw, setTileColorRaw] = useState(
-    normalizeTileColor(initialTileColor),
-  );
-  const [tileColorMode, setTileColorMode] = useState<TileColorMode>("system");
-  const [surfaceFontSize, setSurfaceFontSize] = useState(14);
-  const [tileColor, setTileColor] = useState(() =>
-    resolveTileColor("system", normalizeTileColor(initialTileColor)),
-  );
+const [tileColorRaw, setTileColorRaw] = useState(
+  normalizeTileColor(initialTileColor),
+);
+const [tileColorMode, setTileColorMode] =
+  useState<TileColorMode>("system");
+
+const [themeVersion, setThemeVersion] = useState(0);
+
+const tileColor = useMemo(
+  () => resolveTileColor(tileColorMode, tileColorRaw),
+  [tileColorMode, tileColorRaw, themeVersion],
+);
+  
   const [isExiting, setIsExiting] = useState(false);
   const contentRef = useRef<HTMLTextAreaElement>(null);
   const isStandby = useRef(
@@ -164,12 +169,7 @@ export function NotePad({
           setSurfaceFontSize(loadedConfig.surfaceFontSize ?? 14);
           setTileColorRaw(normalizeTileColor(loadedConfig.tileColor));
           setTileColorMode(loadedConfig.tileColorMode ?? "system");
-          setTileColor(
-            resolveTileColor(
-              loadedConfig.tileColorMode ?? "system",
-              loadedConfig.tileColor,
-            ),
-          );
+          
         }
         if (initialNoteId) {
           const note = await getNote(initialNoteId);
@@ -213,35 +213,44 @@ export function NotePad({
     };
   }, []);
 
-  useEffect(() => {
-    const unlisten = listen<{
-      tileColor?: string;
-      tileColorMode?: TileColorMode;
-      surfaceFontSize?: number;
-    }>("config-changed", (event) => {
-      const mode = event.payload.tileColorMode ?? tileColorMode;
-      const raw = event.payload.tileColor ?? tileColorRaw;
-      setTileColorMode(mode);
-      setTileColorRaw(normalizeTileColor(raw));
-      setTileColor(resolveTileColor(mode, raw));
-      if (event.payload.surfaceFontSize != null) setSurfaceFontSize(event.payload.surfaceFontSize);
-    });
-    return () => {
-      void unlisten.then((fn) => fn());
-    };
-  }, [tileColorMode, tileColorRaw]);
+useEffect(() => {
+  const unlisten = listen<{
+    tileColor?: string;
+    tileColorMode?: TileColorMode;
+    surfaceFontSize?: number;
+  }>("config-changed", (event) => {
+    if (event.payload.tileColorMode) {
+      setTileColorMode(event.payload.tileColorMode);
+    }
 
-  useEffect(() => {
-    if (tileColorMode !== "system") return;
-    const observer = new MutationObserver(() => {
-      setTileColor(resolveTileColor("system", tileColorRaw));
-    });
-    observer.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["data-theme"],
-    });
-    return () => observer.disconnect();
-  }, [tileColorMode, tileColorRaw]);
+    if (event.payload.tileColor) {
+      setTileColorRaw(normalizeTileColor(event.payload.tileColor));
+    }
+
+    if (event.payload.surfaceFontSize != null) {
+      setSurfaceFontSize(event.payload.surfaceFontSize);
+    }
+  });
+
+  return () => {
+    void unlisten.then((fn) => fn());
+  };
+}, []);
+
+useEffect(() => {
+  if (tileColorMode !== "system") return;
+
+  const observer = new MutationObserver(() => {
+    setThemeVersion((v) => v + 1);
+  });
+
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+
+  return () => observer.disconnect();
+}, [tileColorMode]);
 
   useEffect(() => {
     let myLabel = "";
